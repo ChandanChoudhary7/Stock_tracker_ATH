@@ -26,7 +26,7 @@ function isMarketOpen() {
   return currentMinutes >= marketStart && currentMinutes <= marketEnd;
 }
 
-// Fetch historical data and calculate dynamic ATH
+// Fetch historical data and calculate dynamic ATH based on closing prices
 async function fetchDynamicATH(symbol) {
   const cacheKey = `ATH_${symbol}`;
   const cached = ATH_CACHE.get(cacheKey);
@@ -62,28 +62,29 @@ async function fetchDynamicATH(symbol) {
         const timestamps = result.timestamp;
         const quotes = result.indicators?.quote?.[0];
         
-        if (!quotes?.high || !timestamps) {
+        if (!quotes?.close || !quotes?.volume || !timestamps) {
           continue;
         }
 
-        const highs = quotes.high;
-        let athPrice = 0;
+        const closes = quotes.close;
+        const volumes = quotes.volume;
+        let athClose = 0;
         let athIndex = 0;
 
-        // Find the highest price and its index
-        highs.forEach((price, index) => {
-          if (price !== null && price > athPrice) {
-            athPrice = price;
+        // Calculate ATH based on highest closing price with positive volume
+        closes.forEach((price, index) => {
+          if (price !== null && volumes[index] > 0 && price > athClose) {
+            athClose = price;
             athIndex = index;
           }
         });
 
-        if (athPrice > 0) {
+        if (athClose > 0) {
           const athTimestamp = timestamps[athIndex] * 1000; // Convert to milliseconds
           const athDate = new Date(athTimestamp);
 
           const athData = {
-            athPrice: Math.round(athPrice * 100) / 100,
+            athPrice: Math.round(athClose * 100) / 100,
             athDate: athDate.toISOString().split('T')[0], // YYYY-MM-DD format
             athDateFormatted: athDate.toLocaleDateString('en-IN', {
               year: 'numeric',
@@ -112,7 +113,7 @@ async function fetchDynamicATH(symbol) {
   return null;
 }
 
-// Parse current price data
+// Parse current price data from Yahoo Finance
 function parseYahooResponse(data) {
   try {
     const result = data?.chart?.result?.[0];
@@ -143,13 +144,12 @@ function parseYahooResponse(data) {
   }
 }
 
-// Fetch current stock data
+// Fetch current stock data with caching
 async function fetchCurrentStockData(symbol) {
   const cacheKey = `PRICE_${symbol}`;
   const cached = PRICE_CACHE.get(cacheKey);
   const now = Date.now();
 
-  // Check if cached current price data is still valid
   if (cached && now - cached.timestamp < PRICE_CACHE_DURATION) {
     console.log(`📦 Price cache hit for ${symbol}`);
     return cached.data;
@@ -174,12 +174,10 @@ async function fetchCurrentStockData(symbol) {
       if (response.data?.chart) {
         const parsed = parseYahooResponse(response.data);
         if (parsed) {
-          // Cache the result
           PRICE_CACHE.set(cacheKey, {
             data: parsed,
             timestamp: now
           });
-
           console.log(`✅ Current price fetched for ${symbol}: ₹${parsed.price}`);
           return parsed;
         }
@@ -189,7 +187,6 @@ async function fetchCurrentStockData(symbol) {
       continue;
     }
   }
-  
   return null;
 }
 
@@ -208,13 +205,11 @@ function generateDemoData(symbol) {
   const change = Math.round((price - previousClose) * 100) / 100;
   const changePercent = Math.round((change / previousClose) * 10000) / 100;
   
-  // Generate demo ATH (15-20% higher than current price)
   const athPrice = Math.round(price * 1.18 * 100) / 100;
   const athDate = new Date();
-  athDate.setMonth(athDate.getMonth() - Math.floor(Math.random() * 24)); // Random date within 2 years
+  athDate.setMonth(athDate.getMonth() - Math.floor(Math.random() * 24)); 
   
   return {
-    // Current data
     price,
     previousClose,
     change,
@@ -226,8 +221,6 @@ function generateDemoData(symbol) {
     currency: 'INR',
     symbol,
     timestamp: new Date().toISOString(),
-    
-    // ATH data
     athPrice,
     athDate: athDate.toISOString().split('T')[0],
     athDateFormatted: athDate.toLocaleDateString('en-IN', {
@@ -235,7 +228,6 @@ function generateDemoData(symbol) {
       month: 'long',
       day: 'numeric'
     }),
-    
     isDemo: true
   };
 }
@@ -254,14 +246,12 @@ export default async function handler(req, res) {
   console.log(`🔄 Processing request for symbol: ${symbol}`);
   
   try {
-    // Fetch both current data and ATH data in parallel
     const [currentData, athData] = await Promise.all([
       fetchCurrentStockData(symbol),
       fetchDynamicATH(symbol)
     ]);
     
     if (currentData) {
-      // Combine current data with ATH data
       const response = {
         ...currentData,
         ...(athData || {}),
@@ -272,16 +262,12 @@ export default async function handler(req, res) {
       return res.status(200).json(response);
     }
     
-    // Fallback to demo data
-    console.log(`⚠️ Live data failed, using demo data for ${symbol}`);
+    console.log(`⚠️ Live data failed, returning fallback demo for ${symbol}`);
     const demoData = generateDemoData(symbol);
-    
     return res.status(200).json(demoData);
     
   } catch (error) {
     console.error(`💥 API Error for ${symbol}:`, error.message);
-    
-    // Return demo data as last resort
     const demoData = generateDemoData(symbol);
     return res.status(200).json(demoData);
   }
