@@ -120,15 +120,17 @@ const StockTracker = ({ selectedSymbol }) => {
     fetchStockData(true);
   }, [selectedSymbol, fetchStockData]);
   
-  // Calculate correction from ATH
+  // Calculate correction from ATH and upside percentage
   const calculateCorrection = () => {
     if (!stockData || !stockData.athPrice) return null;
     
     const correctionPercent = ((stockData.price - stockData.athPrice) / stockData.athPrice) * 100;
+    const upsidePercent = ((stockData.athPrice - stockData.price) / stockData.price) * 100;
     const pointsDiff = Math.abs(stockData.price - stockData.athPrice);
     
     return {
-      percent: Math.round(correctionPercent * 100) / 100,
+      correctionPercent: Math.round(correctionPercent * 100) / 100,
+      upsidePercent: Math.round(upsidePercent * 100) / 100,
       points: Math.round(pointsDiff * 100) / 100,
       isBelow: correctionPercent < 0
     };
@@ -264,18 +266,49 @@ const StockTracker = ({ selectedSymbol }) => {
             </div>
           </div>
           
+          {/* Updated Correction Section with Upside Percentage */}
           {correction && (
             <div className="correction-section">
-              <div className={`correction-card ${correction.isBelow ? 'below' : 'above'}`}>
-                <div className="correction-header">
-                  {correction.isBelow ? 'Below ATH' : 'Above ATH'}
+              <div className="corrections-grid">
+                {/* Correction from ATH */}
+                <div className={`correction-card ${correction.isBelow ? 'below' : 'above'}`}>
+                  <div className="correction-header">
+                    {correction.isBelow ? 'Below ATH' : 'Above ATH'}
+                  </div>
+                  <div className="correction-value">
+                    {correction.correctionPercent}%
+                  </div>
+                  <div className="correction-detail">
+                    {formatNumber(correction.points)} points {correction.isBelow ? 'below' : 'above'} ATH
+                  </div>
                 </div>
-                <div className="correction-value">
-                  {correction.percent}%
-                </div>
-                <div className="correction-detail">
-                  {formatNumber(correction.points)} points {correction.isBelow ? 'below' : 'above'} ATH
-                </div>
+                
+                {/* Upside to ATH */}
+                {correction.isBelow && (
+                  <div className="upside-card">
+                    <div className="upside-header">
+                      Upside to ATH
+                    </div>
+                    <div className="upside-value">
+                      +{correction.upsidePercent}%
+                    </div>
+                    <div className="upside-detail">
+                      Potential gain to reach ATH
+                    </div>
+                  </div>
+                )}
+                
+                {/* If above ATH, show single card taking full width */}
+                {!correction.isBelow && (
+                  <div className="ath-exceeded-card">
+                    <div className="ath-exceeded-header">
+                      🎉 New High Territory
+                    </div>
+                    <div className="ath-exceeded-detail">
+                      Current price exceeds all-time high
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
