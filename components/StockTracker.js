@@ -7,323 +7,213 @@ const StockTracker = ({ selectedSymbol }) => {
   const [error, setError] = useState('');
   const [lastUpdate, setLastUpdate] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  
-  // Auto-refresh timer
   const [refreshTimer, setRefreshTimer] = useState(null);
   const [nextRefresh, setNextRefresh] = useState(0);
-  
-  // Market status
   const [marketStatus, setMarketStatus] = useState('Unknown');
-  
-  // Check if market is open (client-side)
-  const isMarketOpen = () => {
+
+  // Helpers:
+
+  function isMarketOpen() {
     const now = new Date();
-    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-    const hours = istTime.getHours();
-    const minutes = istTime.getMinutes();
-    const day = istTime.getDay();
-    
+    const ist = new Date(now.getTime() + 5.5 * 3600000);
+    const day = ist.getDay();
     if (day === 0 || day === 6) return false;
-    
-    const currentMinutes = hours * 60 + minutes;
-    const marketStart = 9 * 60 + 15;
-    const marketEnd = 15 * 60 + 30;
-    
-    return currentMinutes >= marketStart && currentMinutes <= marketEnd;
-  };
-  
-  // Fetch stock data
+    const minutes = ist.getHours()*60 + ist.getMinutes();
+    return minutes >= (9*60+15) && minutes <= (15*60+30);
+  }
+
+  // Fetch data:
+
   const fetchStockData = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
     setIsRefreshing(true);
     setError('');
-    
     try {
-      console.log(`🔄 Fetching data for ${selectedSymbol.symbol}`);
-      const response = await axios.get(`/api/stock?symbol=${encodeURIComponent(selectedSymbol.symbol)}`, {
-        timeout: 15000
+      const res = await axios.get(`/api/stock?symbol=${selectedSymbol.symbol}`, {
+        timeout: 10000
       });
-      
-      if (response.data) {
-        setStockData(response.data);
+      if (res.data) {
+        setStockData(res.data);
         setLastUpdate(new Date());
-        setMarketStatus(response.data.marketState === 'REGULAR' ? 'Open' : 'Closed');
-        
-        console.log('✅ Data fetched successfully:', response.data);
+        setMarketStatus(res.data.marketState === 'REGULAR' ? 'Open' : 'Closed');
       } else {
         throw new Error('No data received');
       }
     } catch (err) {
-      console.error('❌ Error fetching stock data:', err.message);
-      setError(`Failed to fetch data: ${err.message}`);
-      
-      // Keep old data if available
+      setError('Failed to load stock data: ' + err.message);
       if (!stockData) {
-        setStockData({
-          price: 0,
-          change: 0,
-          changePercent: 0,
-          previousClose: 0,
-          dayHigh: 0,
-          dayLow: 0,
-          athPrice: 0,
-          athDate: null,
-          error: true
-        });
+        setStockData({ error: true });
       }
     } finally {
-      if (showLoading) setLoading(false);
+      setLoading(false);
       setIsRefreshing(false);
     }
   }, [selectedSymbol, stockData]);
-  
-  // Manual refresh handler
-  const handleManualRefresh = () => {
+
+  const handleRefreshClick = () => {
     fetchStockData(true);
   };
-  
-  // Setup auto-refresh
-  useEffect(() => {
-    if (refreshTimer) {
-      clearInterval(refreshTimer);
-    }
-    
-    const marketOpen = isMarketOpen();
-    const refreshInterval = marketOpen ? 30000 : 300000; // 30s during market hours, 5min otherwise
-    
-    const timer = setInterval(() => {
-      fetchStockData(false); // Auto-refresh without loading indicator
-    }, refreshInterval);
-    
-    setRefreshTimer(timer);
-    
-    // Countdown timer
-    const countdownTimer = setInterval(() => {
-      setNextRefresh(prev => {
-        if (prev <= 1) {
-          return refreshInterval / 1000;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    
-    setNextRefresh(refreshInterval / 1000);
-    
-    return () => {
-      if (timer) clearInterval(timer);
-      if (countdownTimer) clearInterval(countdownTimer);
-    };
-  }, [selectedSymbol, fetchStockData]);
-  
-  // Initial data fetch when symbol changes
+
+  // Auto refresh:
+
   useEffect(() => {
     fetchStockData(true);
-  }, [selectedSymbol, fetchStockData]);
-  
-  // Calculate correction from ATH and upside percentage
-  const calculateCorrection = () => {
-    if (!stockData || !stockData.athPrice) return null;
-    
-    const correctionPercent = ((stockData.price - stockData.athPrice) / stockData.athPrice) * 100;
-    const upsidePercent = ((stockData.athPrice - stockData.price) / stockData.price) * 100;
-    const pointsDiff = Math.abs(stockData.price - stockData.athPrice);
-    
+
+    if (refreshTimer) clearInterval(refreshTimer);
+
+    const open = isMarketOpen();
+    const intervalMs = open ? 30000 : 300000; // 30s or 5 min
+
+    const timer = setInterval(fetchStockData, intervalMs);
+    setRefreshTimer(timer);
+
+    let countdown = intervalMs / 1000;
+    setNextRefresh(countdown);
+    const countdownTimer = setInterval(() => {
+      setNextRefresh((c) => (c <= 1 ? countdown : c -1));
+    }, 1000);
+
+    return () => {
+      clearInterval(timer);
+      clearInterval(countdownTimer);
+    };
+  }, [fetchStockData]);
+
+  // Calculate correction and upside %:
+
+  function calculateCorrections() {
+    if (!stockData || !stockData.athPrice || stockData.error) return null;
+    const price = stockData.price;
+    const ath = stockData.athPrice;
+    const diff = price - ath;
+    const correctionPercent = ((diff) / ath)*100;
+    const upsidePercent = ((ath - price) / price)*100;
     return {
-      correctionPercent: Math.round(correctionPercent * 100) / 100,
-      upsidePercent: Math.round(upsidePercent * 100) / 100,
-      points: Math.round(pointsDiff * 100) / 100,
+      correctionPercent: Math.round(correctionPercent*100)/100,
+      upsidePercent: Math.round(upsidePercent*100)/100,
+      diffPoints: Math.round(Math.abs(diff)*100)/100,
       isBelow: correctionPercent < 0
     };
-  };
-  
-  const correction = calculateCorrection();
-  
-  // Format currency
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-IN', {
+  }
+
+  const corr = calculateCorrections();
+
+  // Formatters:
+
+  function formatCurrency(v) {
+    if (v === null || v === undefined) return '-';
+    return v.toLocaleString('en-IN', {
       style: 'currency',
       currency: 'INR',
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
-    }).format(amount);
-  };
-  
-  // Format number
-  const formatNumber = (num) => {
-    return new Intl.NumberFormat('en-IN').format(num);
-  };
-  
-  // Format volume
-  const formatVolume = (volume) => {
-    if (volume >= 10000000) {
-      return `${(volume / 10000000).toFixed(1)}Cr`;
-    } else if (volume >= 100000) {
-      return `${(volume / 100000).toFixed(1)}L`;
-    } else if (volume >= 1000) {
-      return `${(volume / 1000).toFixed(1)}K`;
-    }
-    return volume?.toString() || '0';
-  };
-  
+    });
+  }
+
+  function formatNumber(v) {
+    return v?.toLocaleString('en-IN') || '-';
+  }
+
+  function formatVolume(v) {
+    if (!v) return "0";
+    if (v > 10000000) return (v / 10000000).toFixed(2) + " Cr";
+    if (v > 100000) return (v / 100000).toFixed(2) + " L";
+    if (v > 1000) return (v / 1000).toFixed(2) + " K";
+    return v.toString();
+  }
+
   if (loading && !stockData) {
     return (
       <div className="tracker-container loading">
-        <div className="loading-spinner"></div>
-        <p>Loading {selectedSymbol.label} data...</p>
+        <div className="loading-spinner"/>
+        <p>Loading data for {selectedSymbol.label}...</p>
       </div>
     );
   }
-  
+
   return (
     <div className="tracker-container">
-      {error && (
-        <div className="error-banner">
-          ⚠️ {error}
-        </div>
-      )}
-      
+      {error && <div className="error-banner">⚠️ {error}</div>}
+
       <div className="stock-header">
         <div className="stock-info">
           <h2 className="stock-name">{selectedSymbol.label}</h2>
           <div className="stock-meta">
             <span className={`market-status ${marketStatus.toLowerCase()}`}>
-              {marketStatus === 'Open' ? '🟢' : '🔴'} Market {marketStatus}
+              {marketStatus === 'Open' ? '🟢 Market Open' : '🔴 Market Closed'}
             </span>
-            {stockData?.isDemo && (
-              <span className="demo-badge">📊 Demo Data</span>
-            )}
-            {stockData?.isLive && (
-              <span className="live-badge">🔴 Live Data</span>
-            )}
+            {stockData?.isLive && <span className="live-badge">🔴 Live Data</span>}
+            {stockData?.isDemo && <span className="demo-badge">📊 Demo Data</span>}
           </div>
         </div>
-        
+
         <div className="refresh-controls">
           <button 
-            className={`refresh-btn ${isRefreshing ? 'refreshing' : ''}`}
-            onClick={handleManualRefresh}
+            className={"refresh-btn " + (isRefreshing ? "refreshing" : "")} 
+            onClick={handleRefreshClick}
             disabled={isRefreshing}
           >
-            {isRefreshing ? '🔄' : '↻'} Refresh
+            {isRefreshing ? "🔄 Refreshing..." : "↻ Refresh"}
           </button>
           <div className="next-refresh">
-            Next: {nextRefresh}s
+            Next update in {nextRefresh}s
           </div>
         </div>
       </div>
-      
-      {stockData && (
+
+      {stockData && !stockData.error && (
         <>
-          <div className="price-section">
-            <div className="current-price">
-              {formatCurrency(stockData.price)}
-            </div>
-            
-            <div className={`price-change ${stockData.change >= 0 ? 'positive' : 'negative'}`}>
-              <span className="change-amount">
-                {stockData.change >= 0 ? '+' : ''}{formatCurrency(stockData.change)}
-              </span>
-              <span className="change-percent">
-                ({stockData.change >= 0 ? '+' : ''}{stockData.changePercent}%)
-              </span>
-            </div>
+        <div className="price-section">
+          <div className="current-price">{formatCurrency(stockData.price)}</div>
+          <div className={"price-change " + (stockData.change >= 0 ? "positive" : "negative")}>
+            <span>{stockData.change >=0 ? "+" : ""}{formatCurrency(stockData.change)}</span>
+            <span>({stockData.change >=0 ? "+" : ""}{stockData.changePercent}%)</span>
           </div>
-          
-          {/* ATH Section */}
-          {stockData.athPrice && (
-            <div className="ath-section">
-              <div className="ath-header">All-Time High</div>
-              <div className="ath-price">
-                {formatCurrency(stockData.athPrice)}
+        </div>
+
+        <div className="ath-section">
+          <div className="ath-header">All-Time High</div>
+          <div className="ath-price">{formatCurrency(stockData.athPrice)}</div>
+          {stockData.athDateFormatted &&
+            <div className="ath-date">on {stockData.athDateFormatted}</div>
+          }
+        </div>
+
+        <div className="stats-grid">
+          <div className="stat-item"><strong>Previous Close</strong><br/>{formatCurrency(stockData.previousClose)}</div>
+          <div className="stat-item"><strong>Day High</strong><br/>{formatCurrency(stockData.dayHigh)}</div>
+          <div className="stat-item"><strong>Day Low</strong><br/>{formatCurrency(stockData.dayLow)}</div>
+          <div className="stat-item"><strong>Volume</strong><br/>{formatVolume(stockData.volume)}</div>
+        </div>
+
+        {corr && (
+          <div className="correction-section">
+            <div className="corrections-grid">
+              <div className={"correction-card " + (corr.isBelow ? "below" : "above")}>
+                <div className="correction-header">{corr.isBelow ? "Below ATH" : "Above ATH"}</div>
+                <div className="correction-value">{corr.correctionPercent}%</div>
+                <div className="correction-detail">{formatNumber(corr.diffPoints)} points {corr.isBelow ? "below" : "above"} ATH</div>
               </div>
-              {stockData.athDateFormatted && (
-                <div className="ath-date">
-                  on {stockData.athDateFormatted}
+
+              {corr.isBelow ? (
+                <div className="upside-card">
+                  <div className="upside-header">Upside to ATH</div>
+                  <div className="upside-value">+{corr.upsidePercent}%</div>
+                  <div className="upside-detail">Potential gain to reach ATH</div>
+                </div>
+              ) : (
+                <div className="ath-exceeded-card">
+                  <div className="ath-exceeded-header">🎉 New High Territory 🎉</div>
+                  <div className="ath-exceeded-detail">Current price exceeds ATH</div>
                 </div>
               )}
             </div>
-          )}
-          
-          <div className="stats-grid">
-            <div className="stat-item">
-              <div className="stat-label">Previous Close</div>
-              <div className="stat-value">{formatCurrency(stockData.previousClose)}</div>
-            </div>
-            
-            <div className="stat-item">
-              <div className="stat-label">Day High</div>
-              <div className="stat-value">{formatCurrency(stockData.dayHigh)}</div>
-            </div>
-            
-            <div className="stat-item">
-              <div className="stat-label">Day Low</div>
-              <div className="stat-value">{formatCurrency(stockData.dayLow)}</div>
-            </div>
-            
-            <div className="stat-item">
-              <div className="stat-label">Volume</div>
-              <div className="stat-value">{formatVolume(stockData.volume)}</div>
-            </div>
           </div>
-          
-          {/* Updated Correction Section with Upside Percentage */}
-          {correction && (
-            <div className="correction-section">
-              <div className="corrections-grid">
-                {/* Correction from ATH */}
-                <div className={`correction-card ${correction.isBelow ? 'below' : 'above'}`}>
-                  <div className="correction-header">
-                    {correction.isBelow ? 'Below ATH' : 'Above ATH'}
-                  </div>
-                  <div className="correction-value">
-                    {correction.correctionPercent}%
-                  </div>
-                  <div className="correction-detail">
-                    {formatNumber(correction.points)} points {correction.isBelow ? 'below' : 'above'} ATH
-                  </div>
-                </div>
-                
-                {/* Upside to ATH */}
-                {correction.isBelow && (
-                  <div className="upside-card">
-                    <div className="upside-header">
-                      Upside to ATH
-                    </div>
-                    <div className="upside-value">
-                      +{correction.upsidePercent}%
-                    </div>
-                    <div className="upside-detail">
-                      Potential gain to reach ATH
-                    </div>
-                  </div>
-                )}
-                
-                {/* If above ATH, show single card taking full width */}
-                {!correction.isBelow && (
-                  <div className="ath-exceeded-card">
-                    <div className="ath-exceeded-header">
-                      🎉 New High Territory
-                    </div>
-                    <div className="ath-exceeded-detail">
-                      Current price exceeds all-time high
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          
-          <div className="update-info">
-            {lastUpdate && (
-              <p>
-                Last updated: {lastUpdate.toLocaleTimeString('en-IN', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit'
-                })}
-              </p>
-            )}
-          </div>
+        )}
+
+        <div className="update-info">
+          <p>Last updated: {lastUpdate?.toLocaleTimeString('en-IN', {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</p>
+        </div>
         </>
       )}
     </div>
