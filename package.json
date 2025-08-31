@@ -1,8 +1,7 @@
 {
-  "name": "live-stock-tracker-dynamic-ath",
+  "name": "live-stock-tracker-kite",
   "version": "1.0.0",
-  "description": "Live Stock and Index Tracker with Dynamic ATH Calculation",
-  "main": "index.js",
+  "description": "Live Stock Tracker with Kite Connect API and Dynamic ATH",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -10,26 +9,14 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "next": "^14.0.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "axios": "^1.6.0"
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "axios": "latest",
+    "kiteconnect": "latest"
   },
   "devDependencies": {
-    "eslint": "^8.0.0",
-    "eslint-config-next": "^14.0.0"
-  },
-  "keywords": [
-    "stock",
-    "nifty",
-    "sensex",
-    "live",
-    "tracker",
-    "ath",
-    "all-time-high",
-    "pwa",
-    "next.js"
-  ],
-  "author": "Stock Tracker",
-  "license": "MIT"
+    "eslint": "latest",
+    "eslint-config-next": "latest"
+  }
 }
